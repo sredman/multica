@@ -672,12 +672,13 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 		usage, usageErr := opencodeACPTurnUsage(b.cfg, execPath, env, cwd, sessionID, turnStart, usesV2)
 		if usageErr != nil {
 			usage = TokenUsage{}
-			// Fall back to what the prompt reported only where that figure is
-			// not an overcount: 1.x reports one message (an undercount), and a
-			// fresh 2.x session's total is this turn.
-			if havePrompt && (!usesV2 || opts.ResumeSessionID == "") {
+			// Fall back to what the prompt reported. 2.x reports the prompt's
+			// own steps on a resumed session as on a fresh one, so a resume is
+			// no overcount; 1.x reports one message, which still beats nothing.
+			if havePrompt {
 				usage = pr.usage.TokenUsage
 				usage.CostUSDTicks = 0
+				usage.OutputTokens += pr.usage.rawThoughtTokens
 			}
 			b.cfg.Logger.Warn("opencode: could not read this turn's token usage from the session export", "error", usageErr, "fallback", acpTokenUsagePresent(usage))
 		}

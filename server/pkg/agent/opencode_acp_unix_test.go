@@ -22,6 +22,7 @@ func fakeOpencodeACPScript() string {
 	return `#!/bin/sh
 if [ "$1" = "export" ] || [ "$1" = "session" ]; then
   printf '%s\n' "$*" >> "$FAKE_LOG.export"
+  if [ "$FAKE_MODE" = "export-fail" ]; then exit 1; fi
   printf '%s' '{"info":{"id":"ses_fake"},"messages":[{"info":{"role":"assistant","time":{"created":1},"tokens":{"input":999,"output":999,"cache":{"read":0,"write":0}}}},{"info":{"role":"assistant","time":{"created":9999999999999},"tokens":{"input":40,"output":7,"cache":{"read":3,"write":0}}}}]}'
   exit 0
 fi
@@ -56,7 +57,7 @@ while IFS= read -r line; do
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"CHILD-TEXT"},"_meta":{"opencode/child-session":{"id":"ses_child","parentID":"ses_fake"}}}}}'
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"slept"}}],"rawOutput":{"metadata":{"exit":0}}}}}'
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"parent answer"}}}}'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1}}}\n' "$id" ;;
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":1,"thoughtTokens":4}}}\n' "$id" ;;
     *'"method":"session/cancel"'*)
       printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_fake","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"failed","content":[{"type":"content","content":{"type":"text","text":"Tool execution interrupted"}}]}}}'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"cancelled"}}\n' "$prompt_id" ;;
@@ -155,6 +156,40 @@ func TestOpencodeACPStreamsToolStartAndSumsTurnUsage(t *testing.T) {
 			if version == "1.19.4" && !strings.HasPrefix(string(export), "export ses_fake") ||
 				version != "1.19.4" && !strings.Contains(string(export), "session export ses_fake --standalone") {
 				t.Fatalf("export argv = %q", export)
+			}
+		})
+	}
+}
+
+// A failed session export must not zero the run's usage: the prompt response
+// covers this prompt's steps on a resumed session as well as on a fresh one.
+func TestOpencodeACPExportFailureFallsBackToPromptUsage(t *testing.T) {
+	t.Parallel()
+	for _, version := range []string{"1.19.4", "opencode v2.2.0"} {
+		t.Run(version, func(t *testing.T) {
+			t.Parallel()
+			backend, _ := newFakeOpencodeACP(t, version, "export-fail")
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "do it", ExecOptions{
+				Cwd:             t.TempDir(),
+				Model:           "opencode/picked",
+				ResumeSessionID: "ses_fake",
+				Timeout:         15 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			for range session.Messages {
+			}
+			res := <-session.Result
+			if res.Status != "completed" || res.SessionID != "ses_fake" {
+				t.Fatalf("result = %+v", res)
+			}
+			// The prompt reported input 1, output 1 and 4 thought tokens, which
+			// bill as output.
+			if u := res.Usage["opencode/picked"]; u.InputTokens != 1 || u.OutputTokens != 5 {
+				t.Fatalf("usage = %+v, want the prompt response with thought tokens folded into output", u)
 			}
 		})
 	}
