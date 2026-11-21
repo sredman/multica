@@ -88,7 +88,7 @@ func TestOpencodeExportTurnUsage(t *testing.T) {
 		{"info":{"role":"assistant","time":{"created":100},"tokens":{"input":1000,"output":1000,"reasoning":0,"cache":{"read":0,"write":0}}}},
 		{"info":{"role":"assistant","time":{"created":201},"tokens":{"input":10,"output":5,"reasoning":3,"cache":{"read":7,"write":1}}}},
 		{"info":{"role":"assistant","time":{"created":300},"tokens":{"input":20,"output":6,"reasoning":4,"cache":{"read":8,"write":0}}}}]}`
-	got, err := opencodeExportTurnUsage([]byte(v1), 200, true)
+	got, err := opencodeExportTurnUsage([]byte(v1), 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,20 +96,32 @@ func TestOpencodeExportTurnUsage(t *testing.T) {
 		t.Fatalf("1.x usage = %+v want %+v", got, want)
 	}
 
+	// Releases before 1.3.16 bundle reasoning into output and report no
+	// reasoning field, so nothing is added a second time.
+	bundled := `{"info":{"id":"ses"},"messages":[
+		{"info":{"role":"assistant","time":{"created":300},"tokens":{"input":10,"output":15,"cache":{"read":0,"write":0}}}}]}`
+	got, err = opencodeExportTurnUsage([]byte(bundled), 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (TokenUsage{InputTokens: 10, OutputTokens: 15}); got != want {
+		t.Fatalf("bundled usage = %+v want %+v", got, want)
+	}
+
 	// 2.x flattens message metadata and may print a banner before the JSON.
 	v2 := "warning: banner\n" + `{"info":{"id":"ses"},"messages":[
 		{"type":"model-switched","time":{"created":250}},
 		{"type":"assistant","time":{"created":250},"tokens":{"input":9182,"output":55,"reasoning":256,"cache":{"read":3,"write":0}}},
 		{"type":"assistant","time":{"created":260},"tokens":{"input":115,"output":8,"reasoning":17,"cache":{"read":9187,"write":0}}}]}`
-	got, err = opencodeExportTurnUsage([]byte(v2), 200, false)
+	got, err = opencodeExportTurnUsage([]byte(v2), 200)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := (TokenUsage{InputTokens: 9297, OutputTokens: 63, CacheReadTokens: 9190}); got != want {
+	if want := (TokenUsage{InputTokens: 9297, OutputTokens: 336, CacheReadTokens: 9190}); got != want {
 		t.Fatalf("2.x usage = %+v want %+v", got, want)
 	}
 
-	if _, err := opencodeExportTurnUsage([]byte("not json"), 0, false); err == nil {
+	if _, err := opencodeExportTurnUsage([]byte("not json"), 0); err == nil {
 		t.Fatal("expected a parse error")
 	}
 }

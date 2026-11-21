@@ -763,13 +763,13 @@ func opencodeACPTurnUsage(cfg Config, execPath string, env []string, cwd, sessio
 	if err != nil {
 		return TokenUsage{}, fmt.Errorf("session export: %w", err)
 	}
-	return opencodeExportTurnUsage(data, turnStart.UnixMilli(), opencodeSeparatesReasoning(cfg))
+	return opencodeExportTurnUsage(data, turnStart.UnixMilli())
 }
 
 // opencodeExportTurnUsage reads both export shapes: 1.x nests each message's
 // metadata under `info` with a `role`; 2.x flattens it and names the kind
 // `type`.
-func opencodeExportTurnUsage(data []byte, sinceMs int64, separateReasoning bool) (TokenUsage, error) {
+func opencodeExportTurnUsage(data []byte, sinceMs int64) (TokenUsage, error) {
 	type msgTime struct {
 		Created int64 `json:"created"`
 	}
@@ -806,10 +806,8 @@ func opencodeExportTurnUsage(data []byte, sinceMs int64, separateReasoning bool)
 		}
 		t := info.Tokens
 		usage.InputTokens += t.Input
-		usage.OutputTokens += t.Output
-		if separateReasoning {
-			usage.OutputTokens += t.Reasoning
-		}
+		// Releases that bundle reasoning into output omit the field, so it adds nothing.
+		usage.OutputTokens += t.Output + t.Reasoning
 		if t.Cache != nil {
 			usage.CacheReadTokens += t.Cache.Read
 			usage.CacheWriteTokens += t.Cache.Write
