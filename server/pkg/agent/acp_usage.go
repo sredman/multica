@@ -22,11 +22,12 @@ const (
 // whether a runtime explicitly reported zero or omitted the bucket entirely.
 type acpUsageSnapshot struct {
 	TokenUsage
-	rawInputTokens  int64
-	fields          acpUsageFields
-	totalTokens     int64
-	hasTotalTokens  bool
-	inputNormalized bool
+	rawInputTokens   int64
+	rawThoughtTokens int64
+	fields           acpUsageFields
+	totalTokens      int64
+	hasTotalTokens   bool
+	inputNormalized  bool
 }
 
 func (s acpUsageSnapshot) has(field acpUsageFields) bool {
@@ -209,6 +210,11 @@ func parseACPTokenUsageSnapshot(data json.RawMessage) acpUsageSnapshot {
 	if value, ok := acpUsageInt64(rawFields, "totalTokens", "total_tokens"); ok {
 		snapshot.totalTokens = value
 		snapshot.hasTotalTokens = true
+	}
+	// OpenCode 2.x reports reasoning beside outputTokens as thoughtTokens. It is
+	// not a TokenUsage bucket; backends that bill reasoning as output read it here.
+	if value, ok := acpUsageInt64(rawFields, "thoughtTokens"); ok {
+		snapshot.rawThoughtTokens = value
 	}
 
 	snapshot.normalizeInput()
